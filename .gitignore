@@ -1,0 +1,30 @@
+# Operating system files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Editor / IDE folders
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment / secrets (safety net)
+.env
+.env.local
+.env.*.local
+*.pem
+secrets.json
+
+# Dependencies (not used now, here as a safety net)
+node_modules/

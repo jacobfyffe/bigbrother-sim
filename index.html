@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Big Brother Simulator</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@300;400;600;700&family=Barlow:ital,wght@0,300;0,400;0,600;1,300&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <div class="logo">BIG <span>BROTHER</span></div>
+    <div class="tagline">Simulator · Custom Season · Based on the TV Show</div>
+  </header>
+
+  <!-- SETUP SCREEN -->
+  <div id="setupScreen" class="screen active">
+    <div class="setup-wrap">
+      <div class="setup-card">
+        <div class="setup-title">Cast Your Season</div>
+        <div class="cast-input-area">
+          <input type="text" id="castNameInput" placeholder="Enter houseguest name…" maxlength="30" autocomplete="off">
+          <button class="btn btn-red" onclick="addCastMember()">Add</button>
+        </div>
+        <div class="cast-count">Cast: <span id="castCountNum">0</span> houseguests &nbsp;(min 6, recommended 10–16)</div>
+        <div class="cast-list" id="castList"></div>
+        <div class="divider"></div>
+        <div class="setup-title" style="margin-bottom:10px">Quick-Fill Presets</div>
+        <div class="presets">
+          <button class="btn btn-outline preset-btn" onclick="loadPreset('BB27')">BB27</button>
+          <button class="btn btn-outline preset-btn" onclick="loadPreset('BB26')">BB26</button>
+          <button class="btn btn-outline preset-btn" onclick="loadPreset('BB25')">BB25</button>
+          <button class="btn btn-outline preset-btn" onclick="loadPreset('BB16')">BB16</button>
+          <button class="btn btn-outline preset-btn" onclick="loadPreset('random')">Random</button>
+        </div>
+        <div class="divider"></div>
+        <div class="flex-row">
+          <button class="btn btn-outline preset-btn" onclick="clearCast()">Clear All</button>
+          <button class="btn btn-outline preset-btn" onclick="openSettings()" style="letter-spacing:0">⚙️</button>
+          <button class="btn btn-outline preset-btn" onclick="openDashboardGate()" style="letter-spacing:0">📊 Dashboard</button>
+          <div class="spacer"></div>
+          <button class="btn btn-gold" id="startBtn" onclick="startGame()" disabled>🏠 Enter the House</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GAME SCREEN -->
+  <div id="gameScreen" class="screen">
+
+    <!-- TOP BAR -->
+    <div class="top-bar">
+      <div class="hoh-pill">
+        <span class="hoh-pill-crown">👑</span>
+        <div>
+          <div class="hoh-pill-label">Head of Household</div>
+          <div class="hoh-pill-name" id="hohDisplay">—</div>
+        </div>
+        <div class="week-pill">
+          <div class="week-pill-label">Week</div>
+          <div class="week-pill-num" id="weekDisplay">1</div>
+        </div>
+      </div>
+      <div id="twistBanner" class="twist-banner" style="display:none" onclick="openTwistInfo()" role="button" tabindex="0"></div>
+      <div class="phase-bar" id="phaseBar">
+        <div class="phase-step" id="phase-hoh">HOH</div>
+        <div class="phase-step" id="phase-nom">Noms</div>
+        <div class="phase-step" id="phase-veto">Veto</div>
+        <div class="phase-step" id="phase-evict">Evict</div>
+      </div>
+      <button id="autoPlayBtn" class="btn btn-outline" onclick="toggleAutoPlay()">▶ Auto</button>
+      <button class="btn btn-outline" onclick="openDashboardGate()" title="Stats Dashboard" style="padding:8px 10px;font-size:13px;letter-spacing:0">📊</button>
+      <button class="btn btn-outline" onclick="openSettings()" title="Settings" style="padding:8px 10px;font-size:13px;letter-spacing:0">⚙️</button>
+    </div>
+
+    <!-- TWO-COLUMN SHELL -->
+    <div class="game-shell">
+
+      <!-- LEFT: houseguests + action + secondary panels -->
+      <div class="col-left">
+        <div class="section-label">Houseguests <span class="hint">(click for details)</span></div>
+        <div class="hg-grid" id="hgGrid"></div>
+
+        <div class="action-area" id="actionArea" style="margin-top:12px"></div>
+
+        <div id="alliancesPanel"></div>
+      </div>
+
+      <!-- RIGHT: live info column (tabbed) -->
+      <div class="col-right">
+        <div class="right-tabs">
+          <button class="right-tab active" data-tab="feed"    onclick="setRightTab('feed')">Feed</button>
+          <button class="right-tab"        data-tab="jury"    onclick="setRightTab('jury')">Jury</button>
+          <button class="right-tab"        data-tab="stats"   onclick="setRightTab('stats')">Stats</button>
+          <button class="right-tab"        data-tab="history" onclick="setRightTab('history')">History</button>
+        </div>
+        <div class="right-panel">
+          <div class="right-tab-pane active" data-pane="feed">
+            <ul class="event-log" id="eventLog"></ul>
+          </div>
+          <div class="right-tab-pane" data-pane="jury">
+            <div class="evicted-list" id="evictedList"></div>
+          </div>
+          <div class="right-tab-pane" data-pane="stats">
+            <div id="statsPanel" class="stats-body"></div>
+          </div>
+          <div class="right-tab-pane" data-pane="history">
+            <div class="history-panel" id="historyPanel"></div>
+          </div>
+        </div>
+        <div id="diaryRoomPanel"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FINAL 3 SCREEN -->
+  <div id="final3Screen" class="screen">
+    <div class="top-bar" style="margin-bottom:16px">
+      <div class="hoh-pill">
+        <span class="hoh-pill-crown">🏆</span>
+        <div>
+          <div class="hoh-pill-label">Final 3</div>
+          <div class="hoh-pill-name">The Endgame</div>
+        </div>
+      </div>
+    </div>
+    <div class="action-area" id="final3ActionArea"></div>
+  </div>
+
+  <!-- WINNER SCREEN -->
+  <div id="winnerScreen" class="screen winner-screen">
+    <div class="winner-crown">🏆</div>
+    <div class="winner-title">America's Favorite Winner!</div>
+    <div class="winner-name-display" id="winnerName"></div>
+    <div class="vote-tally" id="voteTally"></div>
+    <div class="winner-stats" id="winnerStats"></div>
+    <div id="runnerUpDisplay" class="runner-up-text"></div>
+    <button class="btn btn-red" onclick="restartGame()" style="font-size:13px;padding:12px 28px">🔄 Play Again</button>
+    <button class="btn btn-outline" onclick="openDashboardGate()" style="font-size:12px;padding:11px 22px;margin-top:10px">📊 View Dashboard</button>
+  </div>
+
+  <script src="script.js"></script>
+
+  <div id="hgModal" class="hg-modal-overlay" onclick="if(event.target===this)closeHGModal()">
+    <div class="hg-modal">
+      <button class="modal-close" onclick="closeHGModal()">✕</button>
+      <div id="hgModalBody"></div>
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div id="settingsModal" class="hg-modal-overlay" onclick="if(event.target===this)closeSettings()">
+    <div class="hg-modal" style="max-width:500px">
+      <button class="modal-close" onclick="closeSettings()">✕</button>
+      <div class="settings-header">
+        <div class="modal-name" style="font-size:18px;letter-spacing:2px">⚙️ Settings</div>
+        <div class="modal-status-label">Customize your season experience</div>
+      </div>
+      <div id="settingsBody"></div>
+    </div>
+  </div>
+
+  <!-- AUTH MODAL -->
+  <div id="authModal" class="hg-modal-overlay" onclick="if(event.target===this)closeAuthModal()">
+    <div class="hg-modal auth-modal">
+      <button class="modal-close" onclick="closeAuthModal()">✕</button>
+      <div id="authBody"></div>
+    </div>
+  </div>
+
+  <!-- TWIST INFO MODAL -->
+  <div id="twistInfoModal" class="hg-modal-overlay" onclick="if(event.target===this)closeTwistInfo()">
+    <div class="hg-modal" style="max-width:480px">
+      <button class="modal-close" onclick="closeTwistInfo()">✕</button>
+      <div id="twistInfoBody"></div>
+    </div>
+  </div>
+
+  <!-- FEEDBACK SUBMIT MODAL -->
+  <div id="feedbackModal" class="hg-modal-overlay" onclick="if(event.target===this)closeFeedbackModal()">
+    <div class="hg-modal" style="max-width:460px">
+      <button class="modal-close" onclick="closeFeedbackModal()">✕</button>
+      <div id="feedbackModalBody"></div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD MODAL -->
+  <div id="dashboardModal" class="dashboard-overlay" onclick="if(event.target===this)closeDashboard()">
+    <div class="dashboard-modal">
+      <button class="modal-close" onclick="closeDashboard()" style="top:14px;right:14px">✕</button>
+      <div class="dashboard-header">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:2px">📊 Stats Dashboard</div>
+      </div>
+      <div id="dashboardBody"></div>
+    </div>
+  </div>
+
+</body>
+</html>
