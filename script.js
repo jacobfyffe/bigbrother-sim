@@ -36,6 +36,93 @@ const OWNER_UID = '86ca6be7-f29c-46af-8b65-16663be388af';
 
 const SETTINGS_KEY = 'bb_settings_v1';
 
+// ══════════════════════════════════════
+//  IN-PROGRESS GAME SAVE  (per-device, localStorage)
+//  Persists the active season so an accidental refresh
+//  doesn't lose progress. Only the live `game` object is
+//  stored; completed seasons are archived separately to
+//  Supabase. Saved state is cleared on finish, on starting
+//  a new season, and via manual "Abandon season".
+// ══════════════════════════════════════
+
+const SAVE_KEY = 'bb_savegame_v1';
+
+// Persist the current game. Called frequently (see setPhase and
+// other state-mutation points). Fails silently if storage is
+// unavailable (e.g. private browsing) so gameplay is never blocked.
+function saveGameState() {
+  try {
+    if (!game) return;
+    const payload = {
+      savedAt: Date.now(),
+      week: game.week,
+      castNames: game.houseguests.map(h => h.name),
+      game,
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+  } catch (e) { /* storage unavailable — ignore */ }
+}
+
+// Return the saved payload, or null if none/invalid.
+function readSavedGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const payload = JSON.parse(raw);
+    // Basic sanity check: must contain a game with houseguests.
+    if (!payload || !payload.game || !Array.isArray(payload.game.houseguests)) return null;
+    return payload;
+  } catch (e) { return null; }
+}
+
+function hasSavedGame() { return readSavedGame() !== null; }
+
+// Remove any saved in-progress game.
+function clearSavedGame() {
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
+}
+
+// Restore a saved game into play. Returns true on success.
+// Option A: re-enter at the START of the saved phase. Completed weeks,
+// relationships, evictions, alliances and all history are restored exactly;
+// only the current (unfinished) phase is re-run from its clean entry point,
+// so no decision the player already acted on is lost.
+function resumeSavedGame() {
+  const payload = readSavedGame();
+  if (!payload) return false;
+  game = payload.game;
+  // Runtime-only fields that shouldn't carry over from saved state.
+  game.autoPlay = false;
+  game.autoPlayDelay = getAutoPlayDelay();
+
+  showScreen('gameScreen');
+  renderAll();
+  renderAlliancesPanel();
+
+  // Re-enter the phase the player was in, from its clean start point.
+  // The _resuming flag tells phase setup to skip once-per-week side
+  // effects (social encounters, alliance fractures) that already ran
+  // when the week first began.
+  game._resuming = true;
+  const phase = game.phase;
+  if (active().length <= 3 || game.final3Phase) {
+    // Was in the Final 3 / endgame — restart that flow.
+    startFinal3();
+  } else if (phase === 'nom') {
+    startNomPhase();
+  } else if (phase === 'veto') {
+    startVetoPhase();
+  } else if (phase === 'evict') {
+    startEvictionPhase();
+  } else {
+    // Default / 'hoh'
+    startHOHPhase();
+  }
+  game._resuming = false;
+  return true;
+}
+
+
 const SETTINGS_DEFAULTS = {
   speed:           'normal',  // slow | normal | fast
   encounters:      'few',     // none | few | many
@@ -113,7 +200,56 @@ document.body && document.body.classList.toggle('no-anim', !settings.animations)
 if (typeof window !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     refreshAnnouncementBanner().catch(() => {});
+    maybeShowResumePrompt();
   });
+}
+
+// If an in-progress season is saved, offer to resume it on the setup screen.
+function maybeShowResumePrompt() {
+  const payload = readSavedGame();
+  if (!payload) return;
+
+  const host = document.getElementById('setupScreen');
+  if (!host) return;
+
+  const when = new Date(payload.savedAt || Date.now());
+  const cast = Array.isArray(payload.castNames) ? payload.castNames : [];
+  const castPreview = cast.slice(0, 4).join(', ') + (cast.length > 4 ? `, +${cast.length - 4} more` : '');
+
+  const banner = document.createElement('div');
+  banner.id = 'resumeBanner';
+  banner.className = 'resume-banner';
+  banner.innerHTML = `
+    <div class="resume-banner-body">
+      <div class="resume-banner-title">🏠 Resume your season?</div>
+      <div class="resume-banner-detail">
+        Week ${payload.week || '?'} &middot; ${cast.length} houseguests${castPreview ? ` (${castPreview})` : ''}
+        <br><span class="resume-banner-when">Saved ${when.toLocaleString()}</span>
+      </div>
+    </div>
+    <div class="resume-banner-actions">
+      <button class="btn btn-gold" onclick="doResumeSeason()">Resume</button>
+      <button class="btn btn-outline" onclick="doDiscardResume()">Start fresh</button>
+    </div>
+  `;
+  // Insert at the top of the setup screen.
+  host.insertBefore(banner, host.firstChild);
+}
+
+function doResumeSeason() {
+  const banner = document.getElementById('resumeBanner');
+  if (banner) banner.remove();
+  if (!resumeSavedGame()) {
+    alert('Sorry — the saved season could not be restored.');
+    clearSavedGame();
+  }
+}
+
+function doDiscardResume() {
+  if (!confirm('Discard the saved season and start fresh?')) return;
+  clearSavedGame();
+  const banner = document.getElementById('resumeBanner');
+  if (banner) banner.remove();
 }
 
 // ══════════════════════════════════════
@@ -207,6 +343,7 @@ function renderSettingsBody() {
     </div>
     <div class="settings-footer">
       <button class="btn btn-outline" onclick="resetSettings()">Reset to defaults</button>
+      ${game ? `<button class="btn btn-outline" style="color:var(--red);border-color:var(--red)" onclick="closeSettings();abandonSeason()">🚪 Abandon Season</button>` : ''}
     </div>
     ${_isOwnerCached ? renderOwnerDebugGroup() : ''}
   `;
@@ -2083,6 +2220,9 @@ document.getElementById('castNameInput').addEventListener('keydown', e => {
 function startGame() {
   if (cast.length < 6) return;
 
+  // Starting a brand-new season clears any prior saved progress.
+  clearSavedGame();
+
   const JURY_SIZE = cast.length <= 8 ? 5 : cast.length <= 12 ? 7 : 9;
 
   game = {
@@ -2876,6 +3016,9 @@ function setPhase(phase) {
     if (i < idx) el.classList.add('done');
     else if (i === idx) el.classList.add('active');
   });
+  // Persist progress at every phase boundary (skip during resume re-entry,
+  // which would just rewrite the same state we're loading).
+  if (!game._resuming) saveGameState();
 }
 
 function showScreen(id) {
@@ -2953,6 +3096,9 @@ function renderAll() {
   renderHGGrid();
   renderEvicted();
   renderStats();
+  // Frequent autosave: renderAll runs after most state changes
+  // (HOH chosen, noms confirmed, eviction processed, etc.).
+  if (game && !game._resuming) saveGameState();
 }
 
 // ══════════════════════════════════════
@@ -3776,7 +3922,7 @@ function startHOHPhase() {
   document.getElementById('diaryRoomPanel').innerHTML = '';
   document.getElementById('alliancesPanel').innerHTML = '';
 
-  if (game.week > 1) {
+  if (game.week > 1 && !game._resuming) {
     runSocialEncounters();
     checkAllianceFractures();
   }
@@ -4763,6 +4909,9 @@ function finalizeJuryVote() {
 
 async function showWinner(winner, runnerUp, votes) {
   showScreen('winnerScreen');
+  // Season is over — clear the in-progress save (the finished season is
+  // archived to Supabase below).
+  clearSavedGame();
   const hg = byName(winner);
   const afpResult = getAmericasFavorite() ? pickAFP(winner, runnerUp) : null;
   const afpName = afpResult ? afpResult.name : null;
@@ -4883,6 +5032,18 @@ function renderHistory() {
 
 function restartGame() {
   clearTimeout(_autoTimer);
+  clearSavedGame();
+  game = null;
+  cast = [];
+  renderCastList();
+  showScreen('setupScreen');
+}
+
+// Manual "Abandon season": discard the in-progress game and return to setup.
+function abandonSeason() {
+  if (!confirm('Abandon this season? Your current progress will be permanently discarded.')) return;
+  clearTimeout(_autoTimer);
+  clearSavedGame();
   game = null;
   cast = [];
   renderCastList();
