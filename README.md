@@ -7,7 +7,7 @@ a three-part Final HOH, and a jury vote to crown a winner. The simulation models
 relationships, grudges, alliances, and a library of authentic *Big Brother* twists,
 then archives every completed season to a personal stats dashboard backed by Supabase.
 
-> **▶ Play it live:** _(add your GitHub Pages URL here once deployed)_
+> **▶ Play it live:** https://jacobfyffe.github.io/bigbrother-sim/
 
 ---
 
