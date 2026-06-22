@@ -196,12 +196,20 @@ function getAmericasFavorite() { return !!settings.americasFavorite; }
 loadSettings();
 document.body && document.body.classList.toggle('no-anim', !settings.animations);
 
-// Fire announcement banner refresh on page load (handles its own errors silently)
+// Run page-load init reliably. If the DOM is still loading, wait for
+// DOMContentLoaded; if it has ALREADY loaded (e.g. the script was cached
+// and parsed late), run immediately. Depending solely on the event can
+// silently miss when the listener registers after the event has fired.
 if (typeof window !== 'undefined') {
-  window.addEventListener('DOMContentLoaded', () => {
+  const runPageInit = () => {
     refreshAnnouncementBanner().catch(() => {});
     maybeShowResumePrompt();
-  });
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', runPageInit);
+  } else {
+    runPageInit();
+  }
 }
 
 // If an in-progress season is saved, offer to resume it on the setup screen.
